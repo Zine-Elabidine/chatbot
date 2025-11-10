@@ -10,7 +10,7 @@
     
     // Configuration
     const CONFIG = {
-        API_URL: 'http://votre-serveur.com:8000', // Remplacer par votre URL
+        API_URL: 'https://chatbot-a00g.onrender.com',
         SESSION_STORAGE_KEY: 'conso_news_chatbot_session'
     };
     

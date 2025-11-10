@@ -380,7 +380,7 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:8000';
+        const API_URL = 'https://chatbot-a00g.onrender.com';
         let sessionId = null;
 
         // Charger ou créer une session au chargement
@@ -525,7 +525,7 @@
             } catch (error) {
                 hideTypingIndicator();
                 console.error('Erreur:', error);
-                showError('Impossible de contacter le serveur. Assurez-vous que l\'API est lancée sur http://localhost:8000');
+                showError('Impossible de contacter le serveur. Veuillez réessayer dans quelques instants.');
             } finally {
                 // Re-enable input
                 input.disabled = false;
