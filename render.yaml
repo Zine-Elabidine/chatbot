@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: conso-news-chatbot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: OPENAI_API_BASE
+        sync: false
+      - key: MODEL_NAME
+        value: gpt-4o-mini
+      - key: TEMPERATURE
+        value: "0.7"
+      - key: PYTHON_VERSION
+        value: "3.11.0"

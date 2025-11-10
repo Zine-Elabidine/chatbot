@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Conso News - Test Interface</title>
+    <!-- Marked.js pour le rendu markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            font-size: 25px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 1200px;
+            height: 850px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-content h1 {
+            font-size: 34px;
+            margin-bottom: 5px;
+        }
+
+        .header-content p {
+            font-size: 18px;
+            opacity: 0.9;
+        }
+
+        .reset-button {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 12px 24px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .reset-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.8);
+            transform: translateY(-1px);
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-start;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 16px 22px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            font-size: 25px;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+        }
+
+        /* Styles pour le contenu markdown */
+        .message-content h1,
+        .message-content h2,
+        .message-content h3 {
+            margin-top: 12px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .message-content h1 { font-size: 28px; }
+        .message-content h2 { font-size: 24px; }
+        .message-content h3 { font-size: 20px; }
+
+        .message-content p {
+            margin-bottom: 8px;
+            line-height: 1.7;
+            font-size: 25px;
+        }
+
+        .message-content ul,
+        .message-content ol {
+            margin-left: 20px;
+            margin-bottom: 8px;
+        }
+
+        .message-content li {
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+
+        .message-content code {
+            background: #f4f4f4;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 25px;
+        }
+
+        .message-content pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin-bottom: 8px;
+        }
+
+        .message-content pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .message-content blockquote {
+            border-left: 3px solid #667eea;
+            padding-left: 12px;
+            margin: 8px 0;
+            color: #666;
+            font-style: italic;
+        }
+
+        /* Styles pour les tables markdown */
+        .message-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 25px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .message-content table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message-content table th {
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #ddd;
+        }
+
+        .message-content table td {
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+        }
+
+        .message-content table tbody tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .message-content table tbody tr:hover {
+            background-color: #f0f0f0;
+        }
+
+        .message-content a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .message-content a:hover {
+            text-decoration: underline;
+        }
+
+        .message-content strong {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .message-content em {
+            font-style: italic;
+        }
+
+        .message-content hr {
+            border: none;
+            border-top: 1px solid #e0e0e0;
+            margin: 12px 0;
+        }
+
+        .input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 18px 24px;
+            border: 2px solid #e0e0e0;
+            border-radius: 30px;
+            font-size: 25px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #messageInput:focus {
+            border-color: #667eea;
+        }
+
+        #sendButton {
+            padding: 18px 36px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #sendButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        #sendButton:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 12px 18px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 18px;
+            width: fit-content;
+        }
+
+        .typing-indicator.active {
+            display: block;
+        }
+
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        .error-message {
+            background: #ff6b6b;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <h1>🤖 Chatbot Conso News</h1>
+                <p>Assistant intelligent avec recherche web</p>
+            </div>
+            <button class="reset-button" onclick="resetConversation()">🔄 Nouvelle conversation</button>
+        </div>
+        
+        <div class="chat-container" id="chatContainer">
+            <div class="message assistant">
+                <div class="message-content">
+                    👋 Bonjour! Je suis l'assistant Conso News. Je peux vous aider à trouver des informations sur l'actualité, les produits, comparer des prix, et bien plus encore. Comment puis-je vous aider aujourd'hui?
+                </div>
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <input 
+                type="text" 
+                id="messageInput" 
+                placeholder="Posez votre question..." 
+                onkeypress="handleKeyPress(event)"
+            >
+            <button id="sendButton" onclick="sendMessage()">Envoyer</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let sessionId = null;
+
+        // Charger ou créer une session au chargement
+        async function initSession() {
+            // Vérifier si une session existe dans localStorage
+            const savedSessionId = localStorage.getItem('chatbot_session_id');
+            
+            if (savedSessionId) {
+                // Vérifier si la session est toujours valide
+                try {
+                    const response = await fetch(`${API_URL}/session/${savedSessionId}/info`);
+                    if (response.ok) {
+                        sessionId = savedSessionId;
+                        console.log('📝 Session existante chargée:', sessionId);
+                        return;
+                    }
+                } catch (error) {
+                    console.log('Session expirée ou invalide');
+                }
+            }
+            
+            // Créer une nouvelle session
+            try {
+                const response = await fetch(`${API_URL}/session/new`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                sessionId = data.session_id;
+                localStorage.setItem('chatbot_session_id', sessionId);
+                console.log('✨ Nouvelle session créée:', sessionId);
+            } catch (error) {
+                console.error('Erreur lors de la création de session:', error);
+            }
+        }
+
+        function addMessage(role, content) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            
+            // Si c'est un message de l'assistant, parser le markdown
+            if (role === 'assistant') {
+                // Configurer marked pour la sécurité
+                marked.setOptions({
+                    breaks: true,  // Sauts de ligne → <br>
+                    gfm: true,     // GitHub Flavored Markdown (tables, etc.)
+                });
+                contentDiv.innerHTML = marked.parse(content);
+            } else {
+                // Messages utilisateur en texte brut
+                contentDiv.textContent = content;
+            }
+            
+            messageDiv.appendChild(contentDiv);
+            chatContainer.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+            const chatContainer = document.getElementById('chatContainer');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant';
+            typingDiv.id = 'typingIndicator';
+            
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator active';
+            indicator.innerHTML = '<span></span><span></span><span></span>';
+            
+            typingDiv.appendChild(indicator);
+            chatContainer.appendChild(typingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        function showError(message) {
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = `⚠️ ${message}`;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Disable input
+            input.disabled = true;
+            sendButton.disabled = true;
+            
+            // Add user message
+            addMessage('user', message);
+            input.value = '';
+            
+            // Show typing indicator
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch(`${API_URL}/session/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+                
+                hideTypingIndicator();
+                
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Mettre à jour le session_id (au cas où une nouvelle session a été créée)
+                if (data.session_id && data.session_id !== sessionId) {
+                    sessionId = data.session_id;
+                    localStorage.setItem('chatbot_session_id', sessionId);
+                }
+                
+                addMessage('assistant', data.response);
+                console.log(`💬 ${data.message_count} messages dans cette session`);
+                
+            } catch (error) {
+                hideTypingIndicator();
+                console.error('Erreur:', error);
+                showError('Impossible de contacter le serveur. Assurez-vous que l\'API est lancée sur http://localhost:8000');
+            } finally {
+                // Re-enable input
+                input.disabled = false;
+                sendButton.disabled = false;
+                input.focus();
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        async function resetConversation() {
+            if (!confirm('Voulez-vous vraiment recommencer une nouvelle conversation?')) {
+                return;
+            }
+            
+            // Supprimer la session actuelle
+            if (sessionId) {
+                try {
+                    await fetch(`${API_URL}/session/${sessionId}`, {
+                        method: 'DELETE'
+                    });
+                    console.log('🗑️ Session supprimée');
+                } catch (error) {
+                    console.error('Erreur lors de la suppression:', error);
+                }
+            }
+            
+            // Supprimer du localStorage
+            localStorage.removeItem('chatbot_session_id');
+            sessionId = null;
+            
+            // Vider l'affichage du chat
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = `
+                <div class="message assistant">
+                    <div class="message-content">
+                        👋 Bonjour! Je suis l'assistant Conso News. Je peux vous aider à trouver des informations sur l'actualité, les produits, comparer des prix, et bien plus encore. Comment puis-je vous aider aujourd'hui?
+                    </div>
+                </div>
+            `;
+            
+            // Créer une nouvelle session
+            await initSession();
+            
+            console.log('✨ Nouvelle conversation démarrée');
+            document.getElementById('messageInput').focus();
+        }
+
+        // Initialiser la session et focus input au chargement
+        window.onload = async () => {
+            await initSession();
+            document.getElementById('messageInput').focus();
+        };
+    </script>
+</body>
+</html>
