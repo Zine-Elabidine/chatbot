@@ -1,11 +1,34 @@
 from typing import TypedDict, Annotated, Sequence
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 from config import LLM_API_KEY, LLM_BASE_URL, TAVILY_API_KEY, MODEL_NAME, TEMPERATURE, get_system_prompt
+from news_store import search_news
+
+
+@tool("search_conso_news")
+def search_conso_news_tool(query: str) -> str:
+    """Recherche dans les articles Conso News (site WordPress local) pour trouver des contenus pertinents.
+
+    Utilise cet outil pour répondre aux questions qui concernent directement les articles publiés sur le site
+    (actualités, dossiers, contenus éditoriaux internes) avant d'utiliser la recherche web générale.
+    """
+    results = search_news(query, top_k=5)
+    if not results:
+        return "Aucun article pertinent trouvé dans la base Conso News."
+
+    lines = []
+    for r in results:
+        snippet = r["text"][:300].replace("\n", " ")
+        lines.append(
+            f"- Titre: {r['title']}\n  Date: {r['date']}\n  URL: {r['url']}\n  Extrait: {snippet}...\n"
+        )
+
+    return "\n".join(lines)
 
 
 class AgentState(TypedDict):
@@ -38,8 +61,8 @@ class ConsoNewsAgent:
             - Obtenir des informations à jour sur n'importe quel sujet"""
         )
         
-        # Liste des outils disponibles
-        self.tools = [self.search_tool]
+        # Liste des outils disponibles (recherche web + recherche dans les articles Conso News)
+        self.tools = [self.search_tool, search_conso_news_tool]
         
         # LLM avec outils bindés
         self.llm_with_tools = self.llm.bind_tools(self.tools)

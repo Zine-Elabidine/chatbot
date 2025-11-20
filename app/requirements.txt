@@ -8,3 +8,6 @@ tavily-python
 python-dotenv
 pydantic
 httpx
+apscheduler
+qdrant-client
+fastembed

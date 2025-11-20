@@ -7,6 +7,8 @@ from typing import List, Optional
 from agent import ConsoNewsAgent
 from session_manager import session_manager
 from langchain_core.messages import HumanMessage, AIMessage
+from apscheduler.schedulers.background import BackgroundScheduler
+from news_store import refresh_all_posts
 import uvicorn
 import os
 
@@ -26,25 +28,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def startup_event():
+    """Démarre le planificateur et effectue une synchronisation initiale des articles."""
+    try:
+        # Synchronisation initiale des articles (on peut ajuster la limite si besoin)
+        refresh_all_posts(limit=200)
+    except Exception as e:
+        # En production, remplacer par un vrai logger
+        print(f"[startup] Erreur lors de la synchronisation initiale des articles: {e}")
+
+    # Tâche récurrente toutes les 1 heure pour rafraîchir l'index des articles
+    scheduler.add_job(refresh_all_posts, "interval", hours=1, kwargs={"limit": 200})
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Arrête proprement le planificateur."""
+    if scheduler.running:
+        scheduler.shutdown()
+
 # Initialisation de l'agent
 agent = ConsoNewsAgent()
+
+# Planificateur pour la synchronisation des articles WordPress
+scheduler = BackgroundScheduler()
 
 # Modèles Pydantic pour les requêtes/réponses
 class ChatMessage(BaseModel):
     role: str
     content: str
 
+
 class ChatRequest(BaseModel):
     message: str
     chat_history: Optional[List[ChatMessage]] = None
+
 
 class SessionChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
 
+
 class ChatResponse(BaseModel):
     response: str
     success: bool = True
+
 
 class SessionChatResponse(BaseModel):
     response: str
@@ -52,9 +83,11 @@ class SessionChatResponse(BaseModel):
     message_count: int
     success: bool = True
 
+
 class SessionResponse(BaseModel):
     session_id: str
     message: str
+
 
 class HealthResponse(BaseModel):
     status: str
