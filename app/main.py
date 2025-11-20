@@ -32,16 +32,23 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     """Démarre le planificateur et effectue une synchronisation initiale des articles."""
-    try:
-        # Synchronisation initiale des articles (on peut ajuster la limite si besoin)
-        refresh_all_posts(limit=200)
-    except Exception as e:
-        # En production, remplacer par un vrai logger
-        print(f"[startup] Erreur lors de la synchronisation initiale des articles: {e}")
-
-    # Tâche récurrente toutes les 1 heure pour rafraîchir l'index des articles
-    scheduler.add_job(refresh_all_posts, "interval", hours=1, kwargs={"limit": 200})
+    # Start scheduler first so port opens quickly
     scheduler.start()
+    
+    # Schedule immediate indexing job (runs in background, doesn't block startup)
+    scheduler.add_job(
+        refresh_all_posts, 
+        "date",  # Run once immediately
+        kwargs={"limit": 50, "batch_size": 10}  # Process 10 posts at a time
+    )
+    
+    # Tâche récurrente 2 fois par jour (toutes les 12 heures) pour rafraîchir l'index
+    scheduler.add_job(
+        refresh_all_posts, 
+        "interval", 
+        hours=12, 
+        kwargs={"limit": 50, "batch_size": 10}
+    )
 
 
 @app.on_event("shutdown")

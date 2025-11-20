@@ -131,8 +131,8 @@ def chunk_text(text: str, max_chars: int = 1000) -> List[str]:
     return chunks
 
 
-def refresh_all_posts(limit: int = 50) -> None:
-    """Fetch latest posts from WordPress, embed them, and rebuild the Qdrant index."""
+def refresh_all_posts(limit: int = 50, batch_size: int = 10) -> None:
+    """Fetch latest posts from WordPress, embed them in batches, and rebuild the Qdrant index."""
     print(f"⌘ Fetching up to {limit} posts from {WORDPRESS_BASE_URL}...")
     qclient = get_qdrant_client()
 
@@ -153,47 +153,89 @@ def refresh_all_posts(limit: int = 50) -> None:
         except Exception as e:
             print(f"[refresh_all_posts] Error deleting Qdrant collection: {e}")
         return
+    
     try:
-        points: List[qmodels.PointStruct] = []
-        point_id = 1
+        # Process posts in batches
+        total_posts = len(posts)
+        total_chunks_indexed = 0
+        vector_size = None
+        collection_created = False
+        
+        for batch_start in range(0, total_posts, batch_size):
+            batch_end = min(batch_start + batch_size, total_posts)
+            batch_posts = posts[batch_start:batch_end]
+            
+            print(f"📦 Processing batch {batch_start//batch_size + 1}/{(total_posts + batch_size - 1)//batch_size} (posts {batch_start+1}-{batch_end})...")
+            
+            points: List[qmodels.PointStruct] = []
+            point_id = total_chunks_indexed + 1
 
-        for post in posts:
-            post_id = post.get("id")
-            title = post.get("title", {}).get("rendered", "")
-            content_html = post.get("content", {}).get("rendered", "")
-            url = post.get("link", "")
-            date = post.get("date", "")
+            for post in batch_posts:
+                post_id = post.get("id")
+                title = post.get("title", {}).get("rendered", "")
+                content_html = post.get("content", {}).get("rendered", "")
+                url = post.get("link", "")
+                date = post.get("date", "")
 
-            content_text = html_to_text(content_html)
-            if not content_text:
-                continue
-
-            chunks = chunk_text(content_text, max_chars=1000)
-            if not chunks:
-                continue
-
-            for idx, chunk in enumerate(chunks):
-                vec = embed_text(chunk)
-                if not vec:
+                content_text = html_to_text(content_html)
+                if not content_text:
                     continue
-                payload = {
-                    "post_id": post_id,
-                    "chunk_index": idx,
-                    "title": title,
-                    "url": url,
-                    "date": date,
-                    "text": chunk,
-                }
-                points.append(
-                    qmodels.PointStruct(
-                        id=point_id,
-                        vector=vec,
-                        payload=payload,
-                    )
-                )
-                point_id += 1
 
-        if not points:
+                chunks = chunk_text(content_text, max_chars=1000)
+                if not chunks:
+                    continue
+
+                for idx, chunk in enumerate(chunks):
+                    vec = embed_text(chunk)
+                    if not vec:
+                        continue
+                    
+                    # Get vector size from first embedding
+                    if vector_size is None:
+                        vector_size = len(vec)
+                    
+                    payload = {
+                        "post_id": post_id,
+                        "chunk_index": idx,
+                        "title": title,
+                        "url": url,
+                        "date": date,
+                        "text": chunk,
+                    }
+                    points.append(
+                        qmodels.PointStruct(
+                            id=point_id,
+                            vector=vec,
+                            payload=payload,
+                        )
+                    )
+                    point_id += 1
+            
+            # Create collection on first batch with points
+            if points and not collection_created:
+                if vector_size is None:
+                    vector_size = len(points[0].vector)
+                
+                qclient.recreate_collection(
+                    collection_name=QDRANT_COLLECTION,
+                    vectors_config=qmodels.VectorParams(
+                        size=vector_size,
+                        distance=qmodels.Distance.COSINE,
+                    ),
+                )
+                collection_created = True
+                print(f"✅ Created collection '{QDRANT_COLLECTION}' with vector size {vector_size}")
+            
+            # Upsert batch points
+            if points:
+                qclient.upsert(
+                    collection_name=QDRANT_COLLECTION,
+                    points=points,
+                )
+                total_chunks_indexed += len(points)
+                print(f"   ✅ Indexed {len(points)} chunks from batch")
+
+        if total_chunks_indexed == 0:
             # We fetched posts but produced no embeddings; clear the collection to avoid stale data
             try:
                 qclient.delete_collection(collection_name=QDRANT_COLLECTION)
@@ -204,24 +246,8 @@ def refresh_all_posts(limit: int = 50) -> None:
                 print(f"[refresh_all_posts] Error deleting Qdrant collection after empty points: {e}")
             return
 
-        vector_size = len(points[0].vector)
-
-        # Recreate collection with appropriate vector size
-        qclient.recreate_collection(
-            collection_name=QDRANT_COLLECTION,
-            vectors_config=qmodels.VectorParams(
-                size=vector_size,
-                distance=qmodels.Distance.COSINE,
-            ),
-        )
-
-        qclient.upsert(
-            collection_name=QDRANT_COLLECTION,
-            points=points,
-        )
-
         print(
-            f"✅ Indexed {len(points)} chunks from {len(posts)} posts into Qdrant collection '{QDRANT_COLLECTION}'"
+            f"✅ Completed! Indexed {total_chunks_indexed} chunks from {total_posts} posts into Qdrant collection '{QDRANT_COLLECTION}'"
         )
 
     except Exception as e:
