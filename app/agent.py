@@ -12,23 +12,56 @@ from news_store import search_news
 
 @tool("search_conso_news")
 def search_conso_news_tool(query: str) -> str:
-    """Recherche dans les articles Conso News (site WordPress local) pour trouver des contenus pertinents.
+    """Recherche exhaustive dans les articles Conso News avec contexte historique ET actualités récentes.
 
-    Utilise cet outil pour répondre aux questions qui concernent directement les articles publiés sur le site
-    (actualités, dossiers, contenus éditoriaux internes) avant d'utiliser la recherche web générale.
+    Cet outil effectue DEUX recherches:
+    1. Recherche large (tous les articles) - pour le contexte historique
+    2. Recherche récente (6 derniers mois) - pour les informations actuelles
+    
+    Utilise cet outil pour toute question liée aux contenus Conso News.
+    APRÈS cette recherche, utilise AUSSI la recherche web Tavily pour compléter avec les dernières actualités.
     """
-    results = search_news(query, top_k=5)
-    if not results:
-        return "Aucun article pertinent trouvé dans la base Conso News."
-
-    lines = []
-    for r in results:
-        snippet = r["text"][:300].replace("\n", " ")
-        lines.append(
-            f"- Titre: {r['title']}\n  Date: {r['date']}\n  URL: {r['url']}\n  Extrait: {snippet}...\n"
-        )
-
-    return "\n".join(lines)
+    output_parts = []
+    
+    # 1. BROAD SEARCH - All articles (historical context)
+    results_all = search_news(query, top_k=5, days_back=None)
+    
+    if results_all:
+        lines = []
+        for i, r in enumerate(results_all, 1):
+            date_str = r['date'][:10] if r['date'] else 'Date inconnue'
+            snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
+            lines.append(
+                f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
+                f"      Titre: {r['title']}\n"
+                f"      URL: {r['url']}\n"
+                f"      Extrait: {snippet}...\n"
+            )
+        output_parts.append(f"📚 ARCHIVES (tous les articles, contexte historique):\n" + "\n".join(lines))
+    else:
+        output_parts.append("📚 ARCHIVES: Aucun article trouvé.")
+    
+    # 2. RECENT SEARCH - Last 6 months only
+    results_recent = search_news(query, top_k=5, days_back=180)
+    
+    if results_recent:
+        lines = []
+        for i, r in enumerate(results_recent, 1):
+            date_str = r['date'][:10] if r['date'] else 'Date inconnue'
+            snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
+            lines.append(
+                f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
+                f"      Titre: {r['title']}\n"
+                f"      URL: {r['url']}\n"
+                f"      Extrait: {snippet}...\n"
+            )
+        output_parts.append(f"\n🆕 ARTICLES RÉCENTS (6 derniers mois):\n" + "\n".join(lines))
+    else:
+        output_parts.append("\n🆕 ARTICLES RÉCENTS: Aucun article des 6 derniers mois trouvé.")
+    
+    output_parts.append("\n💡 CONSEIL: Utilise aussi la recherche web Tavily pour les toutes dernières actualités.")
+    
+    return "\n".join(output_parts)
 
 
 class AgentState(TypedDict):

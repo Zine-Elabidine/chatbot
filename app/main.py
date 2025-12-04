@@ -8,7 +8,7 @@ from agent import ConsoNewsAgent
 from session_manager import session_manager
 from langchain_core.messages import HumanMessage, AIMessage
 from apscheduler.schedulers.background import BackgroundScheduler
-from news_store import refresh_all_posts
+from news_store import index_new_posts
 import uvicorn
 import os
 
@@ -31,24 +31,27 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event():
-    """Démarre le planificateur et effectue une synchronisation initiale des articles."""
+    """Démarre le planificateur pour l'indexation incrémentale des nouveaux articles."""
     # Start scheduler first so port opens quickly
     scheduler.start()
     
-    # Schedule immediate indexing job (runs in background, doesn't block startup)
+    # Check for new posts on startup (last 14 hours to catch any missed)
+    print("📰 Scheduling startup indexing (last 14 hours)...")
     scheduler.add_job(
-        refresh_all_posts, 
+        index_new_posts, 
         "date",  # Run once immediately
-        kwargs={"limit": 50, "batch_size": 10}  # Process 10 posts at a time
+        kwargs={"hours": 14}
     )
     
-    # Tâche récurrente 2 fois par jour (toutes les 12 heures) pour rafraîchir l'index
+    # Tâche récurrente toutes les 12 heures pour indexer les nouveaux articles
+    # Fetch 14h window to have 2h overlap buffer
     scheduler.add_job(
-        refresh_all_posts, 
+        index_new_posts, 
         "interval", 
         hours=12, 
-        kwargs={"limit": 50, "batch_size": 10}
+        kwargs={"hours": 14}
     )
+    print("✅ Scheduler started: indexing every 12h (14h window)")
 
 
 @app.on_event("shutdown")
