@@ -585,18 +585,25 @@ def search_news(query: str, top_k: int = 5, days_back: int = None) -> List[Dict]
     """
     from datetime import datetime, timedelta
 
+    print(f"[search_news] Called with query='{query}', top_k={top_k}, days_back={days_back}")
+
     # On environments where embeddings are disabled (e.g. Render free tier),
     # we cannot embed queries, so we just return no internal results.
     if DISABLE_EMBEDDING:
         print("[search_news] Embeddings disabled (DISABLE_EMBEDDING=1), returning no results.")
         return []
 
+    print("[search_news] Getting Qdrant client...")
     qclient = get_qdrant_client()
 
     try:
+        print("[search_news] Embedding query...")
         query_vec = embed_text(query)
+        print(f"[search_news] Query embedded, vector dim={len(query_vec)}")
     except Exception as e:
         print(f"[search_news] Error embedding query: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
     # Build date filter if specified
@@ -613,6 +620,7 @@ def search_news(query: str, top_k: int = 5, days_back: int = None) -> List[Dict]
         )
 
     try:
+        print(f"[search_news] Querying Qdrant collection '{QDRANT_COLLECTION}'...")
         response = qclient.query_points(
             collection_name=QDRANT_COLLECTION,
             query=query_vec,
@@ -620,8 +628,11 @@ def search_news(query: str, top_k: int = 5, days_back: int = None) -> List[Dict]
             limit=top_k,
         )
         results = response.points
+        print(f"[search_news] Qdrant returned {len(results)} results")
     except Exception as e:
         print(f"[search_news] Error querying Qdrant: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
     scored: List[Dict] = []

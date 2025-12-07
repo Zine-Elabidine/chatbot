@@ -21,47 +21,60 @@ def search_conso_news_tool(query: str) -> str:
     Utilise cet outil pour toute question liée aux contenus Conso News.
     APRÈS cette recherche, utilise AUSSI la recherche web Tavily pour compléter avec les dernières actualités.
     """
+    print(f"[search_conso_news_tool] Called with query: {query}")
     output_parts = []
     
-    # 1. BROAD SEARCH - All articles (historical context)
-    results_all = search_news(query, top_k=5, days_back=None)
-    
-    if results_all:
-        lines = []
-        for i, r in enumerate(results_all, 1):
-            date_str = r['date'][:10] if r['date'] else 'Date inconnue'
-            snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
-            lines.append(
-                f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
-                f"      Titre: {r['title']}\n"
-                f"      URL: {r['url']}\n"
-                f"      Extrait: {snippet}...\n"
-            )
-        output_parts.append(f"📚 ARCHIVES (tous les articles, contexte historique):\n" + "\n".join(lines))
-    else:
-        output_parts.append("📚 ARCHIVES: Aucun article trouvé.")
-    
-    # 2. RECENT SEARCH - Last 6 months only
-    results_recent = search_news(query, top_k=5, days_back=180)
-    
-    if results_recent:
-        lines = []
-        for i, r in enumerate(results_recent, 1):
-            date_str = r['date'][:10] if r['date'] else 'Date inconnue'
-            snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
-            lines.append(
-                f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
-                f"      Titre: {r['title']}\n"
-                f"      URL: {r['url']}\n"
-                f"      Extrait: {snippet}...\n"
-            )
-        output_parts.append(f"\n🆕 ARTICLES RÉCENTS (6 derniers mois):\n" + "\n".join(lines))
-    else:
-        output_parts.append("\n🆕 ARTICLES RÉCENTS: Aucun article des 6 derniers mois trouvé.")
-    
-    output_parts.append("\n💡 CONSEIL: Utilise aussi la recherche web Tavily pour les toutes dernières actualités.")
-    
-    return "\n".join(output_parts)
+    try:
+        # 1. BROAD SEARCH - All articles (historical context)
+        print("[search_conso_news_tool] Starting broad search...")
+        results_all = search_news(query, top_k=5, days_back=None)
+        print(f"[search_conso_news_tool] Broad search returned {len(results_all)} results")
+        
+        if results_all:
+            lines = []
+            for i, r in enumerate(results_all, 1):
+                date_str = r['date'][:10] if r['date'] else 'Date inconnue'
+                snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
+                lines.append(
+                    f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
+                    f"      Titre: {r['title']}\n"
+                    f"      URL: {r['url']}\n"
+                    f"      Extrait: {snippet}...\n"
+                )
+            output_parts.append(f"📚 ARCHIVES (tous les articles, contexte historique):\n" + "\n".join(lines))
+        else:
+            output_parts.append("📚 ARCHIVES: Aucun article trouvé.")
+        
+        # 2. RECENT SEARCH - Last 6 months only
+        print("[search_conso_news_tool] Starting recent search (last 180 days)...")
+        results_recent = search_news(query, top_k=5, days_back=180)
+        print(f"[search_conso_news_tool] Recent search returned {len(results_recent)} results")
+        
+        if results_recent:
+            lines = []
+            for i, r in enumerate(results_recent, 1):
+                date_str = r['date'][:10] if r['date'] else 'Date inconnue'
+                snippet = r["content"][:300].replace("\n", " ") if r.get("content") else ""
+                lines.append(
+                    f"  [{i}] 📅 {date_str} | Score: {r.get('score', 0):.2f}\n"
+                    f"      Titre: {r['title']}\n"
+                    f"      URL: {r['url']}\n"
+                    f"      Extrait: {snippet}...\n"
+                )
+            output_parts.append(f"\n🆕 ARTICLES RÉCENTS (6 derniers mois):\n" + "\n".join(lines))
+        else:
+            output_parts.append("\n🆕 ARTICLES RÉCENTS: Aucun article des 6 derniers mois trouvé.")
+        
+        output_parts.append("\n💡 CONSEIL: Utilise aussi la recherche web Tavily pour les toutes dernières actualités.")
+        
+        print("[search_conso_news_tool] Search completed successfully")
+        return "\n".join(output_parts)
+        
+    except Exception as e:
+        print(f"[search_conso_news_tool] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"❌ Erreur lors de la recherche dans Conso News: {str(e)}"
 
 
 class AgentState(TypedDict):
