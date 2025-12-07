@@ -23,8 +23,12 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")  # Optional, for Qdrant Cloud
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "conso_news_articles")
 
 # FastEmbed configuration (local, no API needed)
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"  # 1024 dims, multilingual (French support)
-EMBEDDING_DIMENSION = 1024
+# Only small multilingual model supported by FastEmbed that fits Render free tier
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # 384 dims, multilingual (~50 langs), 0.22 GB
+EMBEDDING_DIMENSION = 384
+
+# When set (e.g. on Render), completely disable embeddings and Qdrant search/indexing
+DISABLE_EMBEDDING = os.getenv("DISABLE_EMBEDDING", "").lower() in {"1", "true", "yes"}
 
 _EMBED_MODEL: TextEmbedding | None = None
 _QDRANT_CLIENT: QdrantClient | None = None
@@ -39,6 +43,8 @@ BATCH_FILES_DIR = "posts_batches"
 def get_embed_model() -> TextEmbedding:
     """Return a shared FastEmbed model."""
     global _EMBED_MODEL
+    if DISABLE_EMBEDDING:
+        raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
     if _EMBED_MODEL is None:
         print(f"   🔧 Loading FastEmbed model: {EMBEDDING_MODEL}...")
         _EMBED_MODEL = TextEmbedding(model_name=EMBEDDING_MODEL)
@@ -47,6 +53,8 @@ def get_embed_model() -> TextEmbedding:
 
 def embed_text(text: str) -> List[float]:
     """Embed a single text using FastEmbed."""
+    if DISABLE_EMBEDDING:
+        raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
     model = get_embed_model()
     embeddings = list(model.embed([text]))
     return embeddings[0].tolist()
@@ -59,7 +67,9 @@ def embed_texts_batch(texts: List[str]) -> List[List[float]]:
     """
     if not texts:
         return []
-    
+    if DISABLE_EMBEDDING:
+        raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
+
     model = get_embed_model()
     embeddings = list(model.embed(texts))
     return [e.tolist() for e in embeddings]
@@ -469,6 +479,10 @@ def index_new_posts(hours: int = 24) -> None:
     Does NOT recreate the collection - assumes it already exists from initial backfill.
     Uses post_id directly as Qdrant point ID (no chunking).
     """
+    if DISABLE_EMBEDDING:
+        print(f"⚠️ Embeddings disabled (DISABLE_EMBEDDING=1), skipping incremental indexing.")
+        return
+
     print(f"⌘ Incremental index: checking for posts from last {hours} hours...")
     qclient = get_qdrant_client()
     
@@ -570,7 +584,13 @@ def search_news(query: str, top_k: int = 5, days_back: int = None) -> List[Dict]
         days_back: If specified, only return articles from the last N days
     """
     from datetime import datetime, timedelta
-    
+
+    # On environments where embeddings are disabled (e.g. Render free tier),
+    # we cannot embed queries, so we just return no internal results.
+    if DISABLE_EMBEDDING:
+        print("[search_news] Embeddings disabled (DISABLE_EMBEDDING=1), returning no results.")
+        return []
+
     qclient = get_qdrant_client()
 
     try:
@@ -625,7 +645,7 @@ if __name__ == "__main__":
     import sys
     
     print("="*60)
-    print("📰 Conso News Indexer (multilingual-e5-large, 1024 dims)")
+    print("📰 Conso News Indexer (multilingual-MiniLM, 384 dims)")
     print("="*60)
     
     # Check for --fresh flag
