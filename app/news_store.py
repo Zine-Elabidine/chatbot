@@ -6,7 +6,7 @@ from typing import List, Dict, Optional
 
 import requests
 from dotenv import load_dotenv
-from fastembed import TextEmbedding
+import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -22,15 +22,43 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")  # Optional, for Qdrant Cloud
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "conso_news_articles")
 
-# FastEmbed configuration (local, no API needed)
-# Only small multilingual model supported by FastEmbed that fits Render free tier
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # 384 dims, multilingual (~50 langs), 0.22 GB
-EMBEDDING_DIMENSION = 384
+# Embedding configuration
+# gemini-embedding-001: multilingual, supports 3072/1536/768 dims
+# - Runtime queries: Gemini API (free tier, uses LLM_API_KEY)
+# - Batch indexing: Vertex AI (uses GCP credits, for local use)
+EMBEDDING_MODEL_GEMINI = "models/gemini-embedding-001"  # Gemini API model name
+EMBEDDING_MODEL_VERTEX = "gemini-embedding-001"  # Vertex model name
+EMBEDDING_DIMENSION = 768
 
-# When set (e.g. on Render), completely disable embeddings and Qdrant search/indexing
+# Gemini API key (for runtime query embeddings)
+GOOGLE_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GOOGLE_API_KEY")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+
+# Vertex AI config (for batch indexing, local use)
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "gen-lang-client-0981273199")
+GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+GOOGLE_APPLICATION_CREDENTIALS = os.getenv(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "gen-lang-client-0981273199-da547dc931c3.json")
+)
+
+# When set, completely disable embeddings and Qdrant search/indexing
 DISABLE_EMBEDDING = os.getenv("DISABLE_EMBEDDING", "").lower() in {"1", "true", "yes"}
 
-_EMBED_MODEL: TextEmbedding | None = None
+# Initialize Vertex AI
+_VERTEX_INITIALIZED = False
+def _init_vertex_ai():
+    global _VERTEX_INITIALIZED
+    if _VERTEX_INITIALIZED:
+        return
+    # Set credentials env var if file exists
+    if os.path.exists(GOOGLE_APPLICATION_CREDENTIALS):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+    import vertexai
+    vertexai.init(project=GCP_PROJECT_ID, location=GCP_LOCATION)
+    _VERTEX_INITIALIZED = True
+    print(f"   🔧 Vertex AI initialized (project={GCP_PROJECT_ID}, location={GCP_LOCATION})")
 _QDRANT_CLIENT: QdrantClient | None = None
 
 # Cache and progress files
@@ -40,39 +68,77 @@ PROGRESS_FILE = "indexing_progress.json"
 BATCH_FILES_DIR = "posts_batches"
 
 
-def get_embed_model() -> TextEmbedding:
-    """Return a shared FastEmbed model."""
-    global _EMBED_MODEL
-    if DISABLE_EMBEDDING:
-        raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
-    if _EMBED_MODEL is None:
-        print(f"   🔧 Loading FastEmbed model: {EMBEDDING_MODEL}...")
-        _EMBED_MODEL = TextEmbedding(model_name=EMBEDDING_MODEL)
-    return _EMBED_MODEL
-
-
 def embed_text(text: str) -> List[float]:
-    """Embed a single text using FastEmbed."""
+    """Embed a single text using Gemini API (for runtime queries)."""
     if DISABLE_EMBEDDING:
         raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
-    model = get_embed_model()
-    embeddings = list(model.embed([text]))
-    return embeddings[0].tolist()
+    if not GOOGLE_API_KEY:
+        raise RuntimeError("No API key found (set LLM_API_KEY or GOOGLE_API_KEY)")
+    
+    result = genai.embed_content(
+        model=EMBEDDING_MODEL_GEMINI,
+        content=text,
+        task_type="RETRIEVAL_QUERY",
+        output_dimensionality=EMBEDDING_DIMENSION
+    )
+    return result['embedding']
 
 
-def embed_texts_batch(texts: List[str]) -> List[List[float]]:
+def embed_texts_batch(texts: List[str], batch_size: int = 10) -> List[List[float]]:
     """
-    Embed multiple texts using FastEmbed.
-    FastEmbed handles batching internally and runs on CPU.
+    Embed multiple texts using Vertex AI (for batch indexing, local use).
+    We are limited to 5 online prediction requests per minute for this base model,
+    so we throttle to ~4 requests/min (sleep ~15s between batches).
     """
     if not texts:
         return []
     if DISABLE_EMBEDDING:
         raise RuntimeError("Embeddings are disabled (DISABLE_EMBEDDING env var is set)")
 
-    model = get_embed_model()
-    embeddings = list(model.embed(texts))
-    return [e.tolist() for e in embeddings]
+    _init_vertex_ai()
+    from vertexai.language_models import TextEmbeddingModel
+
+    model = TextEmbeddingModel.from_pretrained(EMBEDDING_MODEL_VERTEX)
+    all_embeddings = []
+    total = len(texts)
+
+    # Target ~4 requests/min to stay under the 5 req/min quota
+    sleep_between_batches = 15.0
+
+    for i in range(0, total, batch_size):
+        batch = texts[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (total + batch_size - 1) // batch_size
+
+        print(f"      📊 Batch {batch_num}/{total_batches} ({len(batch)} texts)")
+
+        # Retry once on quota errors, then fall back to zeros for this batch
+        for attempt in range(2):
+            try:
+                embeddings = model.get_embeddings(batch, output_dimensionality=EMBEDDING_DIMENSION)
+                all_embeddings.extend([e.values for e in embeddings])
+                break
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "quota" in error_str.lower() or "RESOURCE_EXHAUSTED" in error_str:
+                    # Quota hit: wait one full interval then retry once
+                    if attempt == 0:
+                        print(f"      ⏳ Quota hit, waiting {sleep_between_batches}s then retrying...")
+                        time.sleep(sleep_between_batches)
+                    else:
+                        print("      ⚠️ Quota still exceeded, using zeros for this batch")
+                else:
+                    print(f"⚠️ Batch embedding failed: {e}")
+                    all_embeddings.extend([[0.0] * EMBEDDING_DIMENSION] * len(batch))
+                    break
+        else:
+            # All attempts failed due to quota
+            all_embeddings.extend([[0.0] * EMBEDDING_DIMENSION] * len(batch))
+
+        # Always sleep between batches to respect 5 req/min
+        time.sleep(sleep_between_batches)
+
+    return all_embeddings
 
 
 # ============================================================
@@ -574,6 +640,104 @@ def index_new_posts(hours: int = 24) -> None:
         save_embeddings_cache(embeddings_cache)
 
 
+def repair_zero_embeddings(batch_size: int = 5) -> None:
+    """Re-embed posts whose embeddings are all zeros.
+
+    This scans the local embeddings cache, finds entries where every component
+    is 0.0, fetches their payloads from Qdrant, re-embeds the corresponding
+    text using Vertex AI, and upserts the fixed vectors back into Qdrant.
+    """
+    if DISABLE_EMBEDDING:
+        print("⚠️ Embeddings disabled (DISABLE_EMBEDDING=1), cannot repair zeros.")
+        return
+
+    print("⌘ Repair zeros: scanning embeddings cache...")
+
+    embeddings_cache = load_embeddings_cache()
+    if not embeddings_cache:
+        print("⚠️ No embeddings cache found.")
+        return
+
+    zero_ids = [pid for pid, vec in embeddings_cache.items() if vec and all(v == 0.0 for v in vec)]
+    print(f"✅ Found {len(zero_ids)} posts with all-zero embeddings")
+
+    if not zero_ids:
+        return
+
+    qclient = get_qdrant_client()
+
+    fixed = 0
+    for i in range(0, len(zero_ids), batch_size):
+        chunk_ids = zero_ids[i:i + batch_size]
+        print(f"\n🔎 Fetching payloads for {len(chunk_ids)} posts (chunk {i//batch_size+1}/{(len(zero_ids)+batch_size-1)//batch_size})")
+
+        try:
+            points = qclient.retrieve(collection_name=QDRANT_COLLECTION, ids=chunk_ids)
+        except Exception as e:
+            print(f"⚠️ Failed to retrieve points from Qdrant: {e}")
+            continue
+
+        if not points:
+            print("⚠️ No points returned for these IDs, skipping chunk")
+            continue
+
+        texts: list[str] = []
+        payloads: list[dict] = []
+        ids_for_chunk: list[int] = []
+
+        for p in points:
+            pid = p.id
+            payload = p.payload or {}
+            title = payload.get("title", "")
+            content = payload.get("content", "")
+            url = payload.get("url", "")
+            date = payload.get("date", "")
+
+            if not content:
+                continue
+
+            full_text = f"{title}\n\n{content}"
+            texts.append(full_text)
+            payloads.append({
+                "post_id": pid,
+                "title": title,
+                "content": content,
+                "url": url,
+                "date": date,
+            })
+            ids_for_chunk.append(pid)
+
+        if not texts:
+            print("⚠️ No usable text in this chunk, skipping")
+            continue
+
+        print(f"   🔄 Re-embedding {len(texts)} posts with zero vectors...")
+        # Use smaller batches for safety; embed_texts_batch will still throttle
+        embeddings = embed_texts_batch(texts, batch_size=batch_size)
+
+        points_to_upsert: list[qmodels.PointStruct] = []
+        for pid, payload, vec in zip(ids_for_chunk, payloads, embeddings):
+            if not vec:
+                continue
+            embeddings_cache[int(pid)] = vec
+            points_to_upsert.append(
+                qmodels.PointStruct(id=pid, vector=vec, payload=payload)
+            )
+
+        if points_to_upsert:
+            try:
+                qclient.upsert(collection_name=QDRANT_COLLECTION, points=points_to_upsert)
+                fixed += len(points_to_upsert)
+                print(f"   ✅ Upserted {len(points_to_upsert)} repaired posts")
+            except Exception as e:
+                print(f"⚠️ Failed to upsert repaired points: {e}")
+
+        # Persist cache after each chunk
+        save_embeddings_cache(embeddings_cache)
+
+    print(f"\n✅ Repair complete. Fixed embeddings for {fixed} posts.")
+
+
 def search_news(query: str, top_k: int = 5, days_back: int = None) -> List[Dict]:
     """
     Search indexed news posts for a query using Qdrant.
@@ -656,12 +820,13 @@ if __name__ == "__main__":
     import sys
     
     print("="*60)
-    print("📰 Conso News Indexer (multilingual-MiniLM, 384 dims)")
+    print("📰 Conso News Indexer (Vertex AI gemini-embedding-001, 768 dims)")
     print("="*60)
     
-    # Check for --fresh flag
+    # Flags
     fresh_mode = "--fresh" in sys.argv
-    
+    repair_zeros_mode = "--repair-zeros" in sys.argv
+
     # Check for --search to just test search
     if "--search" in sys.argv:
         query = " ".join([a for a in sys.argv[1:] if not a.startswith("--")])
@@ -676,6 +841,10 @@ if __name__ == "__main__":
             print(f"Date:  {r['date']}")
             print(f"Content: {r['content'][:200]}...")
             print()
+    elif repair_zeros_mode:
+        # Only repair zero embeddings
+        print("Mode: REPAIR-ZEROS (re-embed posts with all-zero vectors)\n")
+        repair_zero_embeddings()
     else:
         # Full indexing
         print(f"Mode: {'FRESH (delete & rebuild)' if fresh_mode else 'RESUME (use cached embeddings)'}")
